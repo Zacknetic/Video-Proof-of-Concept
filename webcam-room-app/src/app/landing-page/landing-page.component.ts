@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
-// import { UserService } from '../services/user.service';
+import { UserService } from '../services/user.service';
 
 @Component({
   selector: 'app-landing-page',
@@ -13,13 +13,11 @@ import { Router, RouterModule } from '@angular/router';
 export class LandingPageComponent {
   username: string = '';
 
-  constructor(
-    // private userService: UserService, 
-    private router: Router) {}
+  constructor(private userService: UserService, private router: Router) {}
 
   login(): void {
     if (this.username) {
-      // this.userService.setUsername(this.username);
+      this.userService.setUsername(this.username);
       this.router.navigateByUrl('/lobby'); // Adjusted for standalone component routing
     }
   }
