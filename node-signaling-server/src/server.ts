@@ -1,72 +1,106 @@
 import express from 'express';
 import https from 'https';
 import fs from 'fs';
-import WebSocket from 'ws';
+import WebSocket, { WebSocketServer } from 'ws';
 
 const app = express();
-
-// Specify the path to your key and certificate
 const key = fs.readFileSync('./server.key', 'utf8');
 const cert = fs.readFileSync('./server.cert', 'utf8');
-
-// Create an HTTPS server
 const server = https.createServer({ key, cert }, app);
 
-// Attach WebSocket server to the same HTTPS server
-const wss = new WebSocket.Server({ server });
-const rooms: any = {}; // Format: { roomId: { users: Map(userId, WebSocket), ... } }
+const wss = new WebSocketServer({ server });
 
-wss.on('connection', (ws) => {
-	let currentUserRoom = null;
-	let userName = null;
-	console.log('A new client connected!');
+interface Room {
+  users: Map<string, WebSocket>;
+}
 
-	ws.on('message', (message) => {
-		const data = JSON.parse(message.toString());
-		switch (data.type) {
-			case 'join':
-				userName = data.name; // Unique identifier for the user
-				const roomId = data.roomId;
-				currentUserRoom = roomId;
+const rooms: Record<string, Room> = {};
 
-				if (!rooms[roomId]) {
-					rooms[roomId] = { users: new Map() };
-				}
+wss.on('connection', (ws: WebSocket) => {
+  let currentUserRoomId: string | null = null;
+  let currentUserId: string | null = null;
 
-				rooms[roomId].users.set(userName, ws);
-				broadcastToRoom(roomId, userName, {
-					type: 'user-joined',
-					name: userName,
-				});
-				break;
-		}
-		console.log('Raw message data:', message); // `message` is the raw data
-		try {
-			const data = JSON.parse(message.toString()); // Directly parse `message`
-			console.log('Parsed message:', data);
+  ws.on('message', (message: string) => {
 
-			// Broadcasting message to all connected clients except the sender
-			wss.clients.forEach((client) => {
-				if (client !== ws && client.readyState === WebSocket.OPEN) {
-					client.send(message); // Sending the original message string
-				}
-			});
-		} catch (error) {
-			console.error('Error parsing message:', error);
-		}
-	});
+    let data: any;
+    try {
+      data = JSON.parse(message);
+      console.log('Received message:', data);
+    } catch (error) {
+      console.error('Invalid JSON', error);
+      return;
+    }
+
+    switch (data.type) {
+      case 'join':
+        const roomId = data.target.username; // Generate a new room ID if not provided
+        const userId = data.local.userId ; // Assign a unique ID to the user
+        currentUserRoomId = roomId;
+        currentUserId = userId;
+
+        if (!rooms[roomId]) {
+          rooms[roomId] = { users: new Map() };
+        }
+
+        rooms[roomId].users.set(userId, ws);
+        broadcastToRoom(roomId, userId);
+        break;
+
+      case 'offer':
+      case 'answer':
+      case 'candidate':
+        // Forward these messages to the specific user in the room
+        if (currentUserRoomId) {
+          const targetUser = rooms[currentUserRoomId]?.users.get(data.target.userId);
+          if (targetUser) {
+            targetUser.send(message);
+          }
+        }
+        break;
+
+      // case 'leave':
+      //   if (currentUserRoomId && currentUserId) {
+      //     leaveRoom(currentUserRoomId, currentUserId);
+      //     broadcastToRoom(currentUserRoomId, currentUserId, { type: 'user-left', userId: currentUserId });
+      //   }
+      //   break;
+
+      default:
+        console.warn('Unhandled message type:', data.type);
+    }
+  });
+
+  // ws.on('close', () => {
+  //   if (currentUserRoomId && currentUserId) {
+  //     leaveRoom(currentUserRoomId, currentUserId);
+  //     broadcastToRoom(currentUserRoomId, currentUserId, { type: 'user-left', userId: currentUserId });
+  //   }
+  // });
 });
 
-// Use your desired port
+function leaveRoom(roomId: string, userId: string) {
+  const room = rooms[roomId];
+  if (room) {
+    room.users.delete(userId);
+    if (room.users.size === 0) {
+      delete rooms[roomId];
+    }
+  }
+}
+
+function broadcastToRoom(roomId: string, senderId: string) {
+  const room = rooms[roomId];
+  if (!room) return;
+
+  room.users.forEach((ws, userId) => {
+    if (userId !== senderId) {
+      console.log('Broadcasting to', userId);
+      ws.send(JSON.stringify(message));
+    }
+  });
+}
+
 const port = 3000;
 server.listen(port, () => {
-	console.log(`Server listening on https://192.168.50.12:${port}`);
+  console.log(`Server listening on https://localhost:${port}`);
 });
-
-function broadcastToRoom(roomId: string, sender: string, message: any) {
-	rooms[roomId].users.forEach((user, userId) => {
-		if (userId !== sender) {
-			user.send(JSON.stringify(message));
-		}
-	});
-}

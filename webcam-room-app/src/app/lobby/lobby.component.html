@@ -1,1 +1,14 @@
-<p>lobby works!</p>
+<!-- LobbyComponent Template -->
+<div class="lobby-container">
+    <div class="video-preview">
+      <video id="localPreview" autoplay muted></video> <!-- For local video preview -->
+    </div>
+  
+    <div class="create-room">
+      <input type="text" [(ngModel)]="newRoomName" placeholder="Enter new room name">
+      <button (click)="createAndEnterRoom()">Create/Enter Room</button>
+    </div>
+  
+    <!-- Additional UI elements for listing/joining existing rooms can be added here -->
+  </div>
+  

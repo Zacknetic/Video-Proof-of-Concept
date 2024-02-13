@@ -6,5 +6,5 @@ import { RoomComponent } from './room/room.component';
 export const appRoutes: Routes = [
   { path: '', component: LandingPageComponent, title: 'Landing Page' },
   { path: 'lobby', component: LobbyComponent, title: 'Lobby' },
-  { path: 'room', component: RoomComponent, title: 'Room' }
+  { path: 'room/:id', component: RoomComponent, title: 'Room' }
 ];

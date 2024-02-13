@@ -1,74 +1,110 @@
-import { Injectable } from '@angular/core';
+import { Injectable, Injector } from '@angular/core';
 import { VideoService } from './video.service';
 import { UserService } from './user.service';
-import { PeerInfo, SignalingData, User } from '../../types/dataTypes';
+import { User } from '../../types/dataTypes';
+import { SignalingService } from './signaling.service';
 
 @Injectable({
 	providedIn: 'root',
 })
 export class PeerConnectionService {
-	private peerConnections: Map<string, PeerInfo> = new Map();
+	private peerConnections: Map<string, RTCPeerConnection> = new Map();
 
 	constructor(
 		private videoService: VideoService,
 		private userService: UserService,
+		private injector: Injector // Inject Angular's Injector
 	) {}
 
-	public async createPeerConnection(remoteUser: User) {
+	public async createPeerConnection(
+		remoteUser: User
+	): Promise<RTCPeerConnection> {
 		if (this.userService.getLocalUser().userId === remoteUser.userId)
 			throw new Error('Cannot create peer connection with self');
 		if (this.peerConnections.has(remoteUser.userId))
-			throw new Error('Peer connection already exists');
+			return this.peerConnections.get(remoteUser.userId)!; // Return existing connection if already exists
 
 		console.log(
 			`Creating peer connection with ${remoteUser.username} (${remoteUser.userId})`
 		);
-
-		const peerConnection: RTCPeerConnection = new RTCPeerConnection({
+		const peerConnection = new RTCPeerConnection({
 			iceServers: [
 				{
-					urls: ['turn:192.168.50.12:3478'], // TURN server's address
+					urls: 'turn:192.168.50.12:3478', // TURN server's address
 					username: 'exampleUser', // TURN server username
 					credential: 'examplePassword', // TURN server password
 				},
 			],
 		});
 
-		const localStream: MediaStream = await this.videoService.getLocalStream();
-		localStream.getTracks().forEach((track) => {
-			peerConnection.addTrack(track, localStream);
-		});
+		const localStream = await this.videoService.getLocalStream();
+		localStream
+			.getTracks()
+			.forEach((track) => peerConnection.addTrack(track, localStream));
 
-		peerConnection.ontrack = (event) => {
-			console.log(
-				`Received remote track from ${remoteUser.username} (${remoteUser.userId})`
-			);
-			if (!event.streams || event.streams[0]) {
-				console.warn('No remote stream found');
-			} else this.videoService.addVideoStream(event.streams[0], remoteUser);
+		const offer = await peerConnection.createOffer();
+		await peerConnection.setLocalDescription(offer);
+
+		const signalingService = this.injector.get(SignalingService);
+
+		// Prepare the offer data
+		const offerData = {
+			type: 'offer',
+			offer: offer, // Ensure you're sending the SDP (Session Description Protocol)
+			local: this.userService.getLocalUser(),
+			target: remoteUser, // Ensure the target is correctly formatted for your signaling needs
 		};
+
+		// Send the offer through the SignalingService
+		signalingService.sendSignalingData(offerData);
+
+		peerConnection.ontrack = (event) => this.onRemoteTrack(event, remoteUser);
+		peerConnection.onicecandidate = (event) =>
+			this.onIceCandidate(event, remoteUser);
+
+		this.peerConnections.set(remoteUser.userId, peerConnection);
+		return peerConnection;
 	}
 
-	public async closePeerConnectionWithUser(remoteUser: User) {
+	private onRemoteTrack(event: RTCTrackEvent, remoteUser: User) {
 		console.log(
-			`Closing peer connection with ${remoteUser.username} (${remoteUser.userId})`
+			`Received remote track from ${remoteUser.username} (${remoteUser.userId})`
 		);
-		const peerConnection: PeerInfo | undefined = this.peerConnections.get(
-			remoteUser.userId
-		);
-		if (peerConnection) {
-			peerConnection.peerConnection.close();
-			this.peerConnections.delete(remoteUser.userId);
+		if (event.streams && event.streams[0]) {
+			this.videoService.addVideoStream(event.streams[0], remoteUser);
+		} else {
+			console.warn('No remote stream found');
 		}
 	}
 
-	public getPeerConnection(remoteUser: User): RTCPeerConnection {
-		let peerConnection: PeerInfo | undefined = this.peerConnections.get(
-			remoteUser.userId
+	private onIceCandidate(event: RTCPeerConnectionIceEvent, remoteUser: User) {
+		if (event.candidate) {
+			console.log(`Local ICE candidate: ${event.candidate.candidate}`);
+			const signalingService = this.injector.get(SignalingService); // Use the class directly
+			signalingService.sendSignalingData({
+				type: 'candidate',
+				candidate: event.candidate,
+				local: this.userService.getLocalUser(),
+				target: remoteUser,
+			});
+		}
+	}
+
+	public async getOrCreatePeerConnection(
+		remoteUser: User
+	): Promise<RTCPeerConnection> {
+		return (
+			this.peerConnections.get(remoteUser.userId) ||
+			(await this.createPeerConnection(remoteUser))
 		);
+	}
 
-		if (!peerConnection) this.createPeerConnection(remoteUser);
-
-		return this.peerConnections.get(remoteUser.userId)!.peerConnection;
+	public async closePeerConnection(remoteUserId: string): Promise<void> {
+		const peerConnection = this.peerConnections.get(remoteUserId);
+		if (peerConnection) {
+			console.log(`Closing peer connection with userId: ${remoteUserId}`);
+			peerConnection.close();
+			this.peerConnections.delete(remoteUserId);
+		}
 	}
 }

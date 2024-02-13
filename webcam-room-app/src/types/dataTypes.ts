@@ -29,14 +29,18 @@ export type SignalingAnswer = SignalingMessage<{
     answer: RTCSessionDescriptionInit;
 }>;
 
+export type SignalingJoin = SignalingMessage<{
+    
+}>;
+
 export type SignalingRoom  = {
     rooms: Room[];
 }
 
-export type SignalingData = SignalingRoom | SignalingMessage<SignalingCandiate | SignalingOffer | SignalingAnswer>;
+export type SignalingData =  SignalingRoom | SignalingMessage<SignalingCandiate | SignalingOffer | SignalingAnswer>;
 
-export interface Room {
+export type Room = {
     id: string;
     name: string;
-    users: string[];
+    users?: string[];
   }
